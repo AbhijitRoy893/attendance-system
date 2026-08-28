@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+{% set active = 'reports' %}
+{% block title %}Reports{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <p class="eyebrow">History</p>
+  <h1>Reports & Recognition Logs</h1>
+  <p>Attendance history, and the full audit trail of every recognition event including unknown faces and ignored duplicates.</p>
+</div>
+
+<div class="card" style="margin-bottom:24px;">
+  <div class="card-header">
+    <h2>Attendance Records</h2>
+    <div style="display:flex; gap:8px; align-items:center;">
+      <input type="date" id="filter-date" style="margin:0; width:auto;">
+      <button id="filter-btn" class="btn btn-secondary">Filter</button>
+    </div>
+  </div>
+  <div class="card-body">
+    <table>
+      <thead><tr><th>Employee</th><th>Date</th><th>Check-in</th><th>Check-out</th><th>Status</th></tr></thead>
+      <tbody id="attendance-body"><tr><td colspan="5" class="empty-state">Loading…</td></tr></tbody>
+    </table>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header">
+    <h2>Recognition Log</h2>
+    <select id="filter-event" style="margin:0; width:auto;">
+      <option value="">All events</option>
+      <option value="recognized">Recognized</option>
+      <option value="unknown">Unknown</option>
+      <option value="duplicate_ignored">Duplicate ignored</option>
+    </select>
+  </div>
+  <div class="card-body">
+    <table>
+      <thead><tr><th>Time</th><th>Employee</th><th>Event</th><th>Confidence</th></tr></thead>
+      <tbody id="logs-body"><tr><td colspan="4" class="empty-state">Loading…</td></tr></tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function loadAttendance(dateFilter) {
+  const body = document.getElementById("attendance-body");
+  try {
+    const path = dateFilter ? `/attendance?date=${dateFilter}` : "/attendance";
+    const records = await api(path);
+    if (records.length === 0) {
+      body.innerHTML = `<tr><td colspan="5" class="empty-state">No records found.</td></tr>`;
+      return;
+    }
+    body.innerHTML = records.map(r => `
+      <tr>
+        <td>${r.employee_name} <span class="mono helper-text">${r.employee_code}</span></td>
+        <td class="mono">${r.date}</td>
+        <td class="mono">${fmtTime(r.check_in_time)}</td>
+        <td class="mono">${fmtTime(r.check_out_time)}</td>
+        <td>${statusBadge(r.status)}</td>
+      </tr>
+    `).join("");
+  } catch (e) {
+    body.innerHTML = `<tr><td colspan="5" class="empty-state">${e.message}</td></tr>`;
+  }
+}
+
+async function loadLogs(eventType) {
+  const body = document.getElementById("logs-body");
+  try {
+    const path = eventType ? `/logs?event_type=${eventType}` : "/logs";
+    const logs = await api(path);
+    if (logs.length === 0) {
+      body.innerHTML = `<tr><td colspan="4" class="empty-state">No log entries yet.</td></tr>`;
+      return;
+    }
+    const eventBadge = { recognized: "badge-present", unknown: "badge-absent", duplicate_ignored: "badge-unknown", inactive_employee: "badge-late" };
+    body.innerHTML = logs.map(l => `
+      <tr>
+        <td class="mono">${fmtTime(l.timestamp)}</td>
+        <td>${l.employee_name}</td>
+        <td><span class="badge ${eventBadge[l.event_type] || 'badge-unknown'}">${l.event_type}</span></td>
+        <td class="mono">${l.confidence ? l.confidence.toFixed(1) : "—"}</td>
+      </tr>
+    `).join("");
+  } catch (e) {
+    body.innerHTML = `<tr><td colspan="4" class="empty-state">${e.message}</td></tr>`;
+  }
+}
+
+document.getElementById("filter-btn").addEventListener("click", () => {
+  loadAttendance(document.getElementById("filter-date").value);
+});
+document.getElementById("filter-event").addEventListener("change", (e) => loadLogs(e.target.value));
+
+loadAttendance();
+loadLogs();
+</script>
+{% endblock %}

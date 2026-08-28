@@ -1,0 +1,192 @@
+{% extends "base.html" %}
+{% set active = 'live' %}
+{% block title %}Live Capture{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <p class="eyebrow">Real-time</p>
+  <h1>Live Attendance Capture</h1>
+  <p>Points the camera feed at the recognition engine every second. Handles multiple faces, unknown persons, and duplicate check-ins automatically.</p>
+</div>
+
+<div class="camera-wrap" id="camera-wrap">
+  <video id="video" autoplay playsinline muted></video>
+  <canvas id="overlay" class="overlay"></canvas>
+  <div class="scan-corner scan-tl"></div>
+  <div class="scan-corner scan-tr"></div>
+  <div class="scan-corner scan-bl"></div>
+  <div class="scan-corner scan-br"></div>
+  <div id="result-banner" class="result-banner">
+    <div class="banner-icon" id="banner-icon">✓</div>
+    <div class="banner-title" id="banner-title">Check-in Successful</div>
+    <div class="banner-sub" id="banner-sub">Employee Name</div>
+  </div>
+</div>
+
+<div style="max-width:640px; margin: 16px auto 0; display:flex; justify-content:center; gap:10px;">
+  <button id="toggle-btn" class="btn btn-primary">Start Recognition</button>
+</div>
+
+<div class="feed-panel">
+  <h2 style="font-family:var(--font-display); font-size:15px; margin: 24px 0 10px;">Recognition Feed</h2>
+  <div id="feed-list"></div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const video = document.getElementById("video");
+const overlay = document.getElementById("overlay");
+const ctx = overlay.getContext("2d");
+const toggleBtn = document.getElementById("toggle-btn");
+const feedList = document.getElementById("feed-list");
+const resultBanner = document.getElementById("result-banner");
+const bannerIcon = document.getElementById("banner-icon");
+const bannerTitle = document.getElementById("banner-title");
+const bannerSub = document.getElementById("banner-sub");
+
+let stream = null;
+let running = false;
+let loopHandle = null;
+let bannerHideTimer = null;
+let lastBannerKey = null;   // avoids re-flashing the banner every second for the same event
+
+function showBanner({ kind, title, subtitle }) {
+  clearTimeout(bannerHideTimer);
+  resultBanner.className = "result-banner " + kind;   // 'success' or 'warn'
+  bannerIcon.textContent = kind === "success" ? "✓" : "!";
+  bannerTitle.textContent = title;
+  bannerSub.textContent = subtitle;
+  // Force reflow so the show/scale transition replays even if already visible
+  void resultBanner.offsetWidth;
+  resultBanner.classList.add("show");
+  bannerHideTimer = setTimeout(() => resultBanner.classList.remove("show"), 3000);
+}
+
+function maybeShowBanner(entry) {
+  const employeeName = entry.detail && entry.detail.attendance
+    ? entry.detail.attendance.employee_name
+    : (entry.employee_id ? `Employee #${entry.employee_id}` : null);
+
+  if (entry.event === "check_in") {
+    const key = `checkin-${entry.employee_id}`;
+    if (lastBannerKey === key) return;
+    lastBannerKey = key;
+    showBanner({
+      kind: "success",
+      title: "Check-in Successful",
+      subtitle: `${employeeName} · ${entry.detail.status || "Present"}`,
+    });
+  } else if (entry.event === "check_out") {
+    const key = `checkout-${entry.employee_id}`;
+    if (lastBannerKey === key) return;
+    lastBannerKey = key;
+    showBanner({
+      kind: "success",
+      title: "Check-out Successful",
+      subtitle: employeeName,
+    });
+  } else if (!entry.is_known) {
+    const key = "unknown";
+    if (lastBannerKey === key) return;
+    lastBannerKey = key;
+    showBanner({
+      kind: "warn",
+      title: "Unrecognized Face",
+      subtitle: "This person is not enrolled",
+    });
+  } else {
+    // duplicate_ignored / inactive_employee: no banner, just reset the
+    // dedupe key so a genuinely new event for this person can show again
+    lastBannerKey = null;
+  }
+}
+
+async function initCamera() {
+  stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } });
+  video.srcObject = stream;
+  video.addEventListener("loadedmetadata", () => {
+    overlay.width = video.videoWidth;
+    overlay.height = video.videoHeight;
+  });
+}
+initCamera();
+
+function grabFrame() {
+  const canvas = document.createElement("canvas");
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  canvas.getContext("2d").drawImage(video, 0, 0);
+  return canvas.toDataURL("image/jpeg", 0.8);
+}
+
+function drawBoxes(results) {
+  ctx.clearRect(0, 0, overlay.width, overlay.height);
+  results.forEach(r => {
+    const [x, y, w, h] = r.box;
+    ctx.strokeStyle = r.is_known ? "#1FA97A" : "#E5484D";
+    ctx.lineWidth = 3;
+    ctx.strokeRect(x, y, w, h);
+    ctx.fillStyle = r.is_known ? "#1FA97A" : "#E5484D";
+    const label = r.is_known ? `ID ${r.employee_id}` : "Unknown";
+    ctx.font = "14px 'IBM Plex Mono', monospace";
+    ctx.fillText(label, x, Math.max(14, y - 8));
+  });
+}
+
+function prependFeedItem(entry, employeeName) {
+  const div = document.createElement("div");
+  const cls = !entry.is_known ? "unknown" : (entry.event === "duplicate_ignored" ? "duplicate" : "known");
+  div.className = "feed-item " + cls;
+  const time = new Date().toLocaleTimeString();
+  let text;
+  if (!entry.is_known) {
+    text = `<strong>Unknown face</strong> detected`;
+  } else if (entry.event === "check_in") {
+    text = `<strong>${employeeName || ("ID " + entry.employee_id)}</strong> checked in (${entry.detail.status})`;
+  } else if (entry.event === "check_out") {
+    text = `<strong>${employeeName || ("ID " + entry.employee_id)}</strong> checked out`;
+  } else if (entry.event === "duplicate_ignored") {
+    text = `<strong>${employeeName || ("ID " + entry.employee_id)}</strong> — duplicate ignored`;
+  } else {
+    text = `<strong>${employeeName || ("ID " + entry.employee_id)}</strong> — ${entry.event}`;
+  }
+  div.innerHTML = `<span>${text}</span><span class="mono">${time} · conf ${entry.confidence}</span>`;
+  feedList.prepend(div);
+  while (feedList.children.length > 25) feedList.removeChild(feedList.lastChild);
+}
+
+async function recognizeLoop() {
+  if (!running) return;
+  try {
+    const result = await api("/recognize", {
+      method: "POST",
+      body: JSON.stringify({ image: grabFrame(), source: "web-camera" }),
+    });
+    drawBoxes(result.results);
+    result.results.forEach(r => {
+      const employeeName = r.detail && r.detail.attendance ? r.detail.attendance.employee_name : null;
+      prependFeedItem(r, employeeName);
+      maybeShowBanner(r);
+    });
+  } catch (e) {
+    console.error(e);
+  }
+  loopHandle = setTimeout(recognizeLoop, 1000);
+}
+
+toggleBtn.addEventListener("click", () => {
+  running = !running;
+  toggleBtn.textContent = running ? "Stop Recognition" : "Start Recognition";
+  toggleBtn.className = running ? "btn btn-secondary" : "btn btn-primary";
+  if (running) {
+    recognizeLoop();
+  } else {
+    clearTimeout(loopHandle);
+    ctx.clearRect(0, 0, overlay.width, overlay.height);
+    resultBanner.classList.remove("show");
+    lastBannerKey = null;
+  }
+});
+</script>
+{% endblock %}

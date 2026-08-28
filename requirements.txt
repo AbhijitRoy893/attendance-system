@@ -1,0 +1,22 @@
+##############################################################################
+# Employee Attendance Management System (Face Recognition) — dependencies
+##############################################################################
+
+# Web framework / API
+Flask==3.0.3
+Flask-SQLAlchemy==3.1.1
+Flask-CORS==4.0.1
+
+# Computer Vision / ML
+opencv-contrib-python-headless==4.10.0.84   # includes cv2.face (LBPH)
+numpy==1.26.4
+Pillow==10.4.0
+
+# Utilities
+python-dotenv==1.0.1
+
+# Testing
+pytest==8.3.2
+
+# Note: pinned to opencv-contrib-python-headless (no GUI deps) for server use.
+# For local development with cv2.imshow() debugging, swap to opencv-contrib-python.

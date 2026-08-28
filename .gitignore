@@ -1,0 +1,17 @@
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Runtime-generated data (created automatically on first run)
+database/attendance.db
+database/lbph_model.yml
+database/labels.json
+database/dataset/
+static/captures/recognized/*
+static/captures/unknown/*
+!static/captures/recognized/.gitkeep
+!static/captures/unknown/.gitkeep
+
+.env
+.DS_Store

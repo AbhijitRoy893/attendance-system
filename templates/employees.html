@@ -1,0 +1,196 @@
+{% extends "base.html" %}
+{% set active = 'employees' %}
+{% block title %}Manage Employees{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <p class="eyebrow">Management</p>
+  <h1>Manage Employees</h1>
+  <p>Edit details, deactivate, reactivate, or permanently delete enrolled employees. Every action here is logged below.</p>
+</div>
+
+<div class="card" style="margin-bottom:24px;">
+  <div class="card-header">
+    <h2>All Employees</h2>
+    <a class="btn btn-primary" href="{{ url_for('views.register_page') }}">+ Register New</a>
+  </div>
+  <div class="card-body">
+    <table>
+      <thead>
+        <tr><th>Name</th><th>Code</th><th>Department</th><th>Designation</th><th>Samples</th><th>Status</th><th>Actions</th></tr>
+      </thead>
+      <tbody id="employees-body">
+        <tr><td colspan="7" class="empty-state">Loading…</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header"><h2>Admin Action Log</h2></div>
+  <div class="card-body">
+    <table>
+      <thead><tr><th>Time</th><th>Admin</th><th>Action</th><th>Employee</th><th>Details</th></tr></thead>
+      <tbody id="admin-log-body"><tr><td colspan="5" class="empty-state">Loading…</td></tr></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Edit modal -->
+<div id="edit-modal" style="display:none; position:fixed; inset:0; background:rgba(11,15,20,0.55); align-items:center; justify-content:center; z-index:50;">
+  <div class="card" style="width:420px; max-width:92vw;">
+    <div class="card-header"><h2>Edit Employee</h2></div>
+    <div class="card-body">
+      <input type="hidden" id="edit-id">
+      <label>Full Name</label>
+      <input id="edit-name">
+      <label>Department</label>
+      <input id="edit-department">
+      <label>Designation</label>
+      <input id="edit-designation">
+      <label>Email</label>
+      <input id="edit-email">
+      <div style="display:flex; gap:10px; margin-top:8px;">
+        <button class="btn btn-primary" onclick="saveEdit()">Save Changes</button>
+        <button class="btn btn-secondary" onclick="closeEdit()">Cancel</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let allEmployees = [];
+
+async function loadEmployees() {
+  const body = document.getElementById("employees-body");
+  try {
+    allEmployees = await api("/employees?include_inactive=true");
+    if (allEmployees.length === 0) {
+      body.innerHTML = `<tr><td colspan="7" class="empty-state">No employees registered yet.</td></tr>`;
+      return;
+    }
+    body.innerHTML = allEmployees.map(e => `
+      <tr>
+        <td>${e.name}</td>
+        <td class="mono">${e.employee_code}</td>
+        <td>${e.department || "—"}</td>
+        <td>${e.designation || "—"}</td>
+        <td class="mono">${e.face_samples_count}</td>
+        <td>${e.is_active
+              ? '<span class="badge badge-present">Active</span>'
+              : '<span class="badge badge-absent">Inactive</span>'}</td>
+        <td style="white-space:nowrap;">
+          ${e.is_active ? `
+            <button class="btn btn-secondary" style="padding:6px 10px; font-size:12px;" onclick="openEdit(${e.id})">Edit</button>
+            <button class="btn btn-secondary" style="padding:6px 10px; font-size:12px;" onclick="deactivate(${e.id})">Deactivate</button>
+          ` : `
+            <button class="btn btn-secondary" style="padding:6px 10px; font-size:12px;" onclick="reactivate(${e.id})">Reactivate</button>
+            <button class="btn btn-secondary" style="padding:6px 10px; font-size:12px; color:var(--danger); border-color:var(--danger);" onclick="purge(${e.id})">Delete Permanently</button>
+          `}
+        </td>
+      </tr>
+    `).join("");
+  } catch (err) {
+    body.innerHTML = `<tr><td colspan="7" class="empty-state">${err.message}</td></tr>`;
+  }
+}
+
+function openEdit(id) {
+  const e = allEmployees.find(x => x.id === id);
+  if (!e) return;
+  document.getElementById("edit-id").value = e.id;
+  document.getElementById("edit-name").value = e.name || "";
+  document.getElementById("edit-department").value = e.department || "";
+  document.getElementById("edit-designation").value = e.designation || "";
+  document.getElementById("edit-email").value = e.email || "";
+  document.getElementById("edit-modal").style.display = "flex";
+}
+
+function closeEdit() {
+  document.getElementById("edit-modal").style.display = "none";
+}
+
+async function saveEdit() {
+  const id = document.getElementById("edit-id").value;
+  try {
+    await api(`/employees/${id}`, {
+      method: "PUT",
+      body: JSON.stringify({
+        name: document.getElementById("edit-name").value,
+        department: document.getElementById("edit-department").value,
+        designation: document.getElementById("edit-designation").value,
+        email: document.getElementById("edit-email").value,
+      }),
+    });
+    closeEdit();
+    loadEmployees();
+    loadAdminLogs();
+  } catch (err) {
+    alert("Error: " + err.message);
+  }
+}
+
+async function deactivate(id) {
+  if (!confirm("Deactivate this employee? Their face data will be removed and the model retrained. Attendance history is kept, and this can be undone with Reactivate.")) return;
+  try {
+    await api(`/employees/${id}`, { method: "DELETE" });
+    loadEmployees();
+    loadAdminLogs();
+    refreshEngineStatus();
+  } catch (err) {
+    alert("Error: " + err.message);
+  }
+}
+
+async function reactivate(id) {
+  try {
+    const result = await api(`/employees/${id}/reactivate`, { method: "POST" });
+    alert(result.message);
+    loadEmployees();
+    loadAdminLogs();
+  } catch (err) {
+    alert("Error: " + err.message);
+  }
+}
+
+async function purge(id) {
+  if (!confirm("Permanently delete this employee? This CANNOT be undone and will also erase their attendance history. Type OK to confirm.")) return;
+  if (!confirm("Are you absolutely sure? This is irreversible.")) return;
+  try {
+    await api(`/employees/${id}/purge`, { method: "DELETE" });
+    loadEmployees();
+    loadAdminLogs();
+  } catch (err) {
+    alert("Error: " + err.message);
+  }
+}
+
+async function loadAdminLogs() {
+  const body = document.getElementById("admin-log-body");
+  try {
+    const logs = await api("/admin-logs");
+    if (logs.length === 0) {
+      body.innerHTML = `<tr><td colspan="5" class="empty-state">No admin actions recorded yet.</td></tr>`;
+      return;
+    }
+    const actionBadge = { created: "badge-present", updated: "badge-unknown", deactivated: "badge-late", reactivated: "badge-present", purged: "badge-absent" };
+    body.innerHTML = logs.map(l => `
+      <tr>
+        <td class="mono">${fmtTime(l.timestamp)}</td>
+        <td>${l.admin_username}</td>
+        <td><span class="badge ${actionBadge[l.action] || 'badge-unknown'}">${l.action}</span></td>
+        <td class="mono">${l.employee_code || ("ID " + l.employee_id)}</td>
+        <td>${l.details || "—"}</td>
+      </tr>
+    `).join("");
+  } catch (err) {
+    body.innerHTML = `<tr><td colspan="5" class="empty-state">${err.message}</td></tr>`;
+  }
+}
+
+loadEmployees();
+loadAdminLogs();
+</script>
+{% endblock %}

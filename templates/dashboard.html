@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% set active = 'dashboard' %}
+{% block title %}Dashboard{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <p class="eyebrow">Today · <span id="today-date"></span></p>
+  <h1>Attendance Overview</h1>
+  <p>Live status pulled from the recognition engine and attendance ledger.</p>
+</div>
+
+<div class="stat-grid">
+  <div class="stat-card">
+    <div class="label">Active Employees</div>
+    <div class="value" id="stat-total">—</div>
+  </div>
+  <div class="stat-card accent-success">
+    <div class="label">Present Today</div>
+    <div class="value" id="stat-present">—</div>
+  </div>
+  <div class="stat-card accent-warning">
+    <div class="label">Late Arrivals</div>
+    <div class="value" id="stat-late">—</div>
+  </div>
+  <div class="stat-card accent-danger">
+    <div class="label">Not Yet Checked In</div>
+    <div class="value" id="stat-absent">—</div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header">
+    <h2>Today's Attendance Log</h2>
+    <a class="btn btn-secondary" href="{{ url_for('views.live_page') }}">Open Live Capture</a>
+  </div>
+  <div class="card-body">
+    <table id="attendance-table">
+      <thead>
+        <tr>
+          <th>Employee</th><th>Code</th><th>Department</th>
+          <th>Check-in</th><th>Check-out</th><th>Status</th><th>Confidence</th>
+        </tr>
+      </thead>
+      <tbody id="attendance-body">
+        <tr><td colspan="7" class="empty-state">Loading…</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.getElementById("today-date").textContent = new Date().toLocaleDateString([], { weekday: "long", year: "numeric", month: "long", day: "numeric" });
+
+async function loadDashboard() {
+  try {
+    const data = await api("/attendance/today");
+    document.getElementById("stat-total").textContent = data.total_employees;
+    document.getElementById("stat-present").textContent = data.present;
+    document.getElementById("stat-late").textContent = data.late;
+    document.getElementById("stat-absent").textContent = data.absent;
+
+    const body = document.getElementById("attendance-body");
+    if (data.records.length === 0) {
+      body.innerHTML = `<tr><td colspan="7" class="empty-state"><div class="glyph">◎</div>No attendance recorded yet today.</td></tr>`;
+      return;
+    }
+    body.innerHTML = data.records.map(r => `
+      <tr>
+        <td>${r.employee_name}</td>
+        <td class="mono">${r.employee_code}</td>
+        <td>${r.department || "—"}</td>
+        <td class="mono">${fmtTime(r.check_in_time)}</td>
+        <td class="mono">${fmtTime(r.check_out_time)}</td>
+        <td>${statusBadge(r.status)}</td>
+        <td class="mono">${r.check_in_confidence ? r.check_in_confidence.toFixed(1) : "—"}</td>
+      </tr>
+    `).join("");
+  } catch (e) {
+    document.getElementById("attendance-body").innerHTML =
+      `<tr><td colspan="7" class="empty-state">Could not load attendance: ${e.message}</td></tr>`;
+  }
+}
+
+loadDashboard();
+setInterval(loadDashboard, 8000);
+</script>
+{% endblock %}

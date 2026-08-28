@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{% block title %}Attendance System{% endblock %} · FaceTrack</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="brand">
+      <span class="brand-mark">FT</span>
+      <div class="brand-text">
+        <strong>FaceTrack</strong>
+        <small>Attendance Engine</small>
+      </div>
+    </div>
+    <nav class="nav">
+      <a href="{{ url_for('views.dashboard') }}" class="nav-link {{ 'active' if active=='dashboard' }}">
+        <span class="nav-ico">▣</span> Dashboard
+      </a>
+      <a href="{{ url_for('views.live_page') }}" class="nav-link {{ 'active' if active=='live' }}">
+        <span class="nav-ico">◉</span> Live Capture
+      </a>
+      <a href="{{ url_for('views.register_page') }}" class="nav-link {{ 'active' if active=='register' }}">
+        <span class="nav-ico">＋</span> Register Employee
+      </a>
+      <a href="{{ url_for('views.employees_page') }}" class="nav-link {{ 'active' if active=='employees' }}">
+        <span class="nav-ico">☰</span> Manage Employees
+      </a>
+      <a href="{{ url_for('views.reports_page') }}" class="nav-link {{ 'active' if active=='reports' }}">
+        <span class="nav-ico">≣</span> Reports & Logs
+      </a>
+    </nav>
+    <div class="sidebar-footer">
+      <span id="engine-status" class="status-pill status-unknown">checking engine…</span>
+    </div>
+  </aside>
+
+  <main class="content">
+    {% block content %}{% endblock %}
+  </main>
+</div>
+
+<script src="{{ url_for('static', filename='js/common.js') }}"></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

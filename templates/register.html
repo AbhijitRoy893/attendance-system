@@ -1,0 +1,169 @@
+{% extends "base.html" %}
+{% set active = 'register' %}
+{% block title %}Register Employee{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <p class="eyebrow">Enrolment</p>
+  <h1>Register New Employee</h1>
+  <p>Add employee details, then capture face samples from multiple angles to train the recognizer.</p>
+</div>
+
+<div class="grid-2" style="align-items:start; gap:24px; display:grid; grid-template-columns: 380px 1fr;">
+
+  <div class="card">
+    <div class="card-header"><h2>1 · Employee Details</h2></div>
+    <div class="card-body">
+      <form id="employee-form">
+        <label for="employee_code">Employee Code</label>
+        <input id="employee_code" required placeholder="e.g. EMP-1042">
+
+        <label for="name">Full Name</label>
+        <input id="name" required placeholder="e.g. Ananya Sharma">
+
+        <label for="department">Department</label>
+        <input id="department" placeholder="e.g. Engineering">
+
+        <label for="designation">Designation</label>
+        <input id="designation" placeholder="e.g. Software Engineer II">
+
+        <label for="email">Email</label>
+        <input id="email" type="email" placeholder="name@company.com">
+
+        <button type="submit" class="btn btn-primary" style="width:100%">Save & Continue to Face Capture</button>
+      </form>
+      <p id="form-msg" class="helper-text"></p>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">
+      <h2>2 · Face Capture</h2>
+      <span id="sample-count" class="mono helper-text">0 / 30 samples</span>
+    </div>
+    <div class="card-body">
+      <div class="camera-wrap" id="camera-wrap">
+        <video id="video" autoplay playsinline muted></video>
+        <div class="scan-corner scan-tl"></div>
+        <div class="scan-corner scan-tr"></div>
+        <div class="scan-corner scan-bl"></div>
+        <div class="scan-corner scan-br"></div>
+      </div>
+      <div class="progress-track"><div class="progress-fill" id="progress-fill" style="width:0%"></div></div>
+      <p class="helper-text">
+        Save employee details first. Then look straight at the camera and slowly turn your head
+        left / right / up / down while samples are captured — this improves accuracy under
+        real-world lighting and angle variation.
+      </p>
+      <div style="display:flex; gap:10px; margin-top:14px;">
+        <button id="capture-btn" class="btn btn-primary" disabled>Start Capturing</button>
+        <button id="train-btn" class="btn btn-secondary" disabled>Train Model</button>
+      </div>
+      <p id="capture-msg" class="helper-text"></p>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let currentEmployeeId = null;
+let capturing = false;
+let stream = null;
+const REQUIRED_SAMPLES = 30;
+
+const video = document.getElementById("video");
+const captureBtn = document.getElementById("capture-btn");
+const trainBtn = document.getElementById("train-btn");
+
+async function initCamera() {
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } });
+    video.srcObject = stream;
+  } catch (e) {
+    document.getElementById("capture-msg").textContent = "Camera access denied or unavailable: " + e.message;
+  }
+}
+initCamera();
+
+document.getElementById("employee-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const msg = document.getElementById("form-msg");
+  msg.textContent = "Saving…";
+  try {
+    const employee = await api("/employees", {
+      method: "POST",
+      body: JSON.stringify({
+        employee_code: document.getElementById("employee_code").value,
+        name: document.getElementById("name").value,
+        department: document.getElementById("department").value,
+        designation: document.getElementById("designation").value,
+        email: document.getElementById("email").value,
+      }),
+    });
+    currentEmployeeId = employee.id;
+    msg.textContent = `Saved ${employee.name} (ID ${employee.id}). Ready to capture face samples.`;
+    captureBtn.disabled = false;
+  } catch (err) {
+    msg.textContent = "Error: " + err.message;
+  }
+});
+
+function grabFrame() {
+  const canvas = document.createElement("canvas");
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  canvas.getContext("2d").drawImage(video, 0, 0);
+  return canvas.toDataURL("image/jpeg", 0.85);
+}
+
+async function captureLoop() {
+  if (!capturing) return;
+  const captureMsg = document.getElementById("capture-msg");
+  try {
+    const result = await api(`/employees/${currentEmployeeId}/enroll`, {
+      method: "POST",
+      body: JSON.stringify({ image: grabFrame() }),
+    });
+    document.getElementById("sample-count").textContent = `${result.samples_collected} / ${result.samples_required} samples`;
+    document.getElementById("progress-fill").style.width =
+      Math.min(100, (result.samples_collected / result.samples_required) * 100) + "%";
+    captureMsg.textContent = "Sample captured ✓";
+
+    if (result.ready_to_train) {
+      capturing = false;
+      captureBtn.textContent = "Capture Complete";
+      captureBtn.disabled = true;
+      trainBtn.disabled = false;
+      captureMsg.textContent = "Enough samples collected. Click 'Train Model' to finish enrolment.";
+      return;
+    }
+  } catch (err) {
+    // Common, expected cases: no face / multiple faces in frame — just retry.
+    captureMsg.textContent = err.message;
+  }
+  setTimeout(captureLoop, 400);
+}
+
+captureBtn.addEventListener("click", () => {
+  if (!currentEmployeeId) return;
+  capturing = true;
+  captureBtn.disabled = true;
+  captureLoop();
+});
+
+trainBtn.addEventListener("click", async () => {
+  trainBtn.disabled = true;
+  const captureMsg = document.getElementById("capture-msg");
+  captureMsg.textContent = "Training recognizer…";
+  try {
+    const result = await api(`/employees/${currentEmployeeId}/train`, { method: "POST" });
+    captureMsg.textContent = `Model trained on ${result.employees_in_model} employees (${result.total_samples} samples). Employee is now recognizable on the Live Capture page.`;
+    refreshEngineStatus();
+  } catch (err) {
+    captureMsg.textContent = "Training failed: " + err.message;
+    trainBtn.disabled = false;
+  }
+});
+</script>
+{% endblock %}
