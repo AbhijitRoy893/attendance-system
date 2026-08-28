@@ -1,10 +1,43 @@
 # FaceTrack — AI/ML Employee Attendance Management System
 
-A production-style **Face Recognition Attendance System** built with Python,
-OpenCV, Flask, and SQLite. Employees are enrolled via webcam, a recognizer is
-trained on their face samples, and a live camera feed automatically marks
-attendance — handling multiple faces, unknown persons, duplicate check-ins,
-and lighting variation.
+A production-style **Face Recognition Attendance System** built with Python, OpenCV, Flask, and SQLite. Employees are enrolled via webcam, a recognizer is trained on their face samples, and a live camera feed automatically marks attendance — handling multiple faces, unknown persons, duplicate check-ins, and lighting variation.
+
+![Python](https://img.shields.io/badge/Python-3.10%2B-blue)
+![Flask](https://img.shields.io/badge/Flask-3.x-black)
+![OpenCV](https://img.shields.io/badge/OpenCV-Haar%20%2B%20LBPH-green)
+![License](https://img.shields.io/badge/License-MIT-lightgrey)
+
+---
+
+## Table of Contents
+
+- [Screenshots](#screenshots)
+- [Project Overview](#1-project-overview)
+- [Project Structure](#2-project-structure)
+- [Setup](#3-setup)
+- [Running Tests](#4-running-tests)
+- [Design Decisions & Trade-offs](#5-design-decisions--trade-offs)
+- [Security Note](#6-security-note)
+- [Tuning for Your Deployment](#7-tuning-for-your-deployment)
+- [Roadmap](#8-roadmap)
+
+---
+
+## Screenshots
+
+### Live Recognition — real-time check-in with confidence score
+![Live Capture](docs/screenshots/live-capture.png)
+
+### Employee Enrollment — guided webcam face capture
+![Register Employee](docs/screenshots/register.png)
+
+### Dashboard — today's attendance at a glance
+![Dashboard](docs/screenshots/dashboard.png)
+
+### Employee Management — edit, deactivate, reactivate, and a full admin audit trail
+![Manage Employees](docs/screenshots/manage-employees.png)
+
+---
 
 ```
 ┌─────────────┐      ┌───────────────────┐      ┌──────────────────┐
@@ -63,7 +96,7 @@ attendance-system/
 │   │   ├── dataset_manager.py # On-disk face sample storage
 │   │   └── attendance_engine.py # Check-in/out + duplicate + late-arrival business rules
 │   ├── models/
-│   │   └── db_models.py       # SQLAlchemy models: Employee, Attendance, RecognitionLog
+│   │   └── db_models.py       # SQLAlchemy models: Employee, Attendance, RecognitionLog, AdminActionLog
 │   └── utils/
 │       └── image_utils.py     # base64 <-> OpenCV image helpers
 ├── database/
@@ -76,11 +109,13 @@ attendance-system/
 │   ├── css/style.css
 │   ├── js/common.js
 │   └── captures/                # Snapshot log of recognized/unknown events
-├── templates/                   # dashboard.html, register.html, live.html, reports.html
+├── templates/                   # dashboard.html, register.html, live.html, employees.html, reports.html
 ├── tests/                       # pytest suite (business rules + CV pipeline)
 ├── docs/
 │   ├── ARCHITECTURE.md
-│   └── API.md
+│   ├── API.md
+│   └── screenshots/             # README images
+├── .env.example                 # Template for local environment configuration
 ├── requirements.txt
 └── run.py                       # Entry point
 ```
@@ -88,6 +123,7 @@ attendance-system/
 ## 3. Setup
 
 ```bash
+git clone https://github.com/YOUR_USERNAME/attendance-system.git
 cd attendance-system
 python3 -m venv venv
 source venv/bin/activate          # Windows: venv\Scripts\activate
@@ -96,11 +132,7 @@ cp .env.example .env              # optional — sensible defaults ship without 
 python run.py
 ```
 
-Configuration is via environment variables, loaded automatically from a
-local `.env` file if one exists (see `.env.example` for the full list —
-currently `SECRET_KEY`, `FLASK_DEBUG`, `PORT`). `.env` itself is
-git-ignored, so no real secrets are ever committed; `.env.example` is the
-template that ships with the repo.
+Configuration is via environment variables, loaded automatically from a local `.env` file if one exists (see `.env.example` for the full list — currently `SECRET_KEY`, `FLASK_DEBUG`, `PORT`). `.env` itself is git-ignored, so no real secrets are ever committed; `.env.example` is the template that ships with the repo.
 
 Open **http://localhost:5001**:
 
@@ -110,14 +142,9 @@ Open **http://localhost:5001**:
 - `/` — today's attendance dashboard
 - `/reports` — attendance history + full recognition audit log
 
-> **No login is required in this build** — every page and API endpoint is
-> open to anyone who can reach the server. That's fine for a local demo on
-> your own machine, but before exposing this on a shared network or
-> deploying it for real company use, add access control back in (see
-> "Security note" below).
+> **No login is required in this build** — every page and API endpoint is open to anyone who can reach the server. That's fine for a local demo on your own machine, but before exposing this on a shared network or deploying it for real company use, add access control back in (see [Security Note](#6-security-note) below).
 
-> The face-capture pages require browser camera permission and, outside of
-> `localhost`, HTTPS (a browser requirement for `getUserMedia`).
+> The face-capture pages require browser camera permission and, outside of `localhost`, HTTPS (a browser requirement for `getUserMedia`).
 
 ## 4. Running Tests
 
@@ -126,66 +153,30 @@ pip install pytest
 pytest tests/ -v
 ```
 
-13 tests cover the CV pipeline (detection, training, recognition round-trip)
-and the attendance business rules (check-in, duplicate suppression,
-check-out timing, unknown-face handling, inactive employees, late-arrival
-logic) — all pass against a bundled sample image and an in-memory database,
-so the suite runs standalone with no camera or external services required.
+13 tests cover the CV pipeline (detection, training, recognition round-trip) and the attendance business rules (check-in, duplicate suppression, check-out timing, unknown-face handling, inactive employees, late-arrival logic) — all pass against a bundled sample image and an in-memory database, so the suite runs standalone with no camera or external services required.
 
 ## 5. Design Decisions & Trade-offs
 
-- **LBPH over deep embeddings (dlib / FaceNet):** LBPH trains and infers on
-  CPU in real time with zero extra native build dependencies — it ships
-  inside `opencv-contrib-python`. This keeps the system deployable on
-  ordinary office hardware without a GPU or a slow `dlib` compile step. The
-  trade-off is lower accuracy on large employee rosters or extreme pose/
-  lighting variation than a modern deep embedding model; `FaceEngine` is
-  written as a swappable component so a deep-learning backend (e.g. ONNX
-  ArcFace) can replace it later without touching the API or business logic.
-- **Full retrain on enroll, not incremental learning:** OpenCV's LBPH
-  implementation doesn't reliably support adding one identity without
-  retraining. Retraining on the full dataset takes well under a second for
-  hundreds of employees on typical hardware, so it's simpler and safer than
-  incremental updates.
-- **Soft delete for employees:** attendance history is a compliance/payroll
-  record and must survive an employee's face data being removed. Permanent
-  deletion (`/purge`) is only allowed on an already-deactivated record, as
-  a deliberate two-step safeguard against an accidental irreversible action.
-- **Admin action audit log:** every create/edit/deactivate/reactivate/purge
-  is recorded (`AdminActionLog`), separate from the face-recognition event
-  log (`RecognitionLog`). This build has no login system, so every action
-  is currently attributed to a generic `"admin"` label rather than a real
-  per-person identity — see "Security note" below.
-- **SQLite by default:** zero-config for evaluation/demo; swap the
-  `SQLALCHEMY_DATABASE_URI` in `app/config.py` for Postgres/MySQL in
-  production (the ORM layer doesn't change).
+- **LBPH over deep embeddings (dlib / FaceNet):** LBPH trains and infers on CPU in real time with zero extra native build dependencies — it ships inside `opencv-contrib-python`. This keeps the system deployable on ordinary office hardware without a GPU or a slow `dlib` compile step. The trade-off is lower accuracy on large employee rosters or extreme pose/lighting variation than a modern deep embedding model; `FaceEngine` is written as a swappable component so a deep-learning backend (e.g. ONNX ArcFace) can replace it later without touching the API or business logic.
+- **Full retrain on enroll, not incremental learning:** OpenCV's LBPH implementation doesn't reliably support adding one identity without retraining. Retraining on the full dataset takes well under a second for hundreds of employees on typical hardware, so it's simpler and safer than incremental updates.
+- **Soft delete for employees:** attendance history is a compliance/payroll record and must survive an employee's face data being removed. Permanent deletion (`/purge`) is only allowed on an already-deactivated record, as a deliberate two-step safeguard against an accidental irreversible action.
+- **Admin action audit log:** every create/edit/deactivate/reactivate/purge is recorded (`AdminActionLog`), separate from the face-recognition event log (`RecognitionLog`). This build has no login system, so every action is currently attributed to a generic `"admin"` label rather than a real per-person identity — see [Security Note](#6-security-note) below.
+- **SQLite by default:** zero-config for evaluation/demo; swap the `SQLALCHEMY_DATABASE_URI` in `app/config.py` for Postgres/MySQL in production (the ORM layer doesn't change).
 
 ## 6. Security Note
 
-**This build has no login system** — `/register`, `/employees`, `/live`,
-`/reports`, and every API endpoint are open to anyone who can reach the
-server. That's an intentional simplification for local demos, but it means:
+**This build has no login system** — `/register`, `/employees`, `/live`, `/reports`, and every API endpoint are open to anyone who can reach the server. That's an intentional simplification for local demos, but it means:
 
-- Anyone on the same network can register, edit, deactivate, or
-  permanently delete employee records
+- Anyone on the same network can register, edit, deactivate, or permanently delete employee records
 - Anyone can view attendance history and the recognition/admin audit logs
 
-**Before running this anywhere beyond `localhost` on your own machine**,
-add access control back in. The codebase was previously built with a
-session-based admin login (single shared account, protecting every page
-and mutating endpoint) — reintroducing it means:
+**Before running this anywhere beyond `localhost` on your own machine**, add access control back in:
 
-1. Add a `login_required` / `api_login_required` decorator pair (session
-   cookie check) and apply it to the view routes in `app/api/views.py` and
-   the mutating routes in `app/api/routes.py`
-2. Add a `/login` page and route that sets `session["admin_username"]`
-   on success
-3. Have `_log_admin_action()` in `app/api/routes.py` read the real logged-in
-   username from the session instead of the current hardcoded `"admin"`
+1. Add a `login_required` / `api_login_required` decorator pair (session cookie check) and apply it to the view routes in `app/api/views.py` and the mutating routes in `app/api/routes.py`
+2. Add a `/login` page and route that sets `session["admin_username"]` on success
+3. Have `_log_admin_action()` in `app/api/routes.py` read the real logged-in username from the session instead of the current hardcoded `"admin"`
 
-This is a small, self-contained change — the audit log, Manage Employees
-page, and all business logic already assume an `admin_username` string is
-available; only the "how do we know who's logged in" piece is missing.
+This is a small, self-contained change — the audit log, Manage Employees page, and all business logic already assume an `admin_username` string is available; only the "how do we know who's logged in" piece is missing.
 
 ## 7. Tuning for Your Deployment
 
@@ -199,5 +190,18 @@ All of the following live in `app/config.py`:
 | `SHIFT_START_TIME` / `LATE_GRACE_MINUTES` | Late-arrival policy. |
 | `DETECT_MIN_SIZE` | Ignore faces smaller than this (reduces false positives from distant background people). |
 
-See `docs/ARCHITECTURE.md` for a deeper walkthrough and `docs/API.md` for
-full endpoint documentation.
+See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for a deeper walkthrough and [`docs/API.md`](docs/API.md) for full endpoint documentation.
+
+## 8. Roadmap
+
+Ideas for extending this project further:
+
+- [ ] Formal accuracy evaluation (false-accept/false-reject rate across a labeled multi-identity test set, with a threshold-tuning curve)
+- [ ] Optional deep-embedding backend (ONNX ArcFace / FaceNet) as a swap-in alternative to LBPH, with a side-by-side accuracy comparison
+- [ ] Session-based admin login (see [Security Note](#6-security-note))
+- [ ] Postgres/MySQL support for multi-instance deployment
+- [ ] Docker Compose setup for one-command local spin-up
+
+---
+
+Built as a demonstration of computer vision, applied ML, REST API design, and full-stack integration.
