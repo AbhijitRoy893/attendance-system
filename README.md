@@ -26,16 +26,16 @@ A production-style **Face Recognition Attendance System** built with Python, Ope
 ## Screenshots
 
 ### Live Recognition — real-time check-in with confidence score
-![Live Capture](docs/screenshots/live-capture.png)
+![Live Capture](docs/screenshots/Live-Capture.png)
 
 ### Employee Enrollment — guided webcam face capture
-![Register Employee](docs/screenshots/register.png)
+![Register Employee](docs/screenshots/Register.png)
 
 ### Dashboard — today's attendance at a glance
-![Dashboard](docs/screenshots/dashboard.png)
+![Dashboard](docs/screenshots/Dashboard.png)
 
 ### Employee Management — edit, deactivate, reactivate, and a full admin audit trail
-![Manage Employees](docs/screenshots/manage-employees.png)
+![Manage Employees](docs/screenshots/Manage-Employees.png)
 
 ---
 
